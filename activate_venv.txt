@@ -1,0 +1,5 @@
+.\venv\Scripts\Activate.ps1
+
+
+
+but its auto venv set in Preferences> Open Settings (UI)> Python > Terminal : activate environment is ON so no need
