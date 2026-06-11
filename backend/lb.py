@@ -1,15 +1,9 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 import httpx
 import itertools
 import asyncio
 
 app = FastAPI()
-
-# servers = [
-#     ["http://127.0.0.1:8001/",True],
-#     ["http://127.0.0.1:8002/",True],
-#     ["http://127.0.0.1:8003/",True]
-# ]
 
 servers = {
     "http://127.0.0.1:8001/": True,
@@ -47,36 +41,46 @@ async def health_check():
 async def startup_event():
     asyncio.create_task(health_check())
 
+
 urls = itertools.cycle(servers)
 
 
-@app.get("/")
-def ping_servers():
-    
-    print("REQUEST RECEIVED", flush=True)
+def get_next_server():
     print("Healthy count =", sum(servers.values()), flush=True)
-    # raise Exception("Test")
-    print(servers, flush=True)
     instance = next(urls)
     if sum(servers.values()) > 0:
         while servers[instance] != True:
             print("Trying server:", instance, flush=True)
             instance = next(urls)
     else:
-        raise HTTPException(status_code=404)
-
-    try:
-        with httpx.Client() as client:
-            response = client.get(instance)
-    # except httpx.RequestError:
-    #     raise HTTPException(status_code=503)
-    except httpx.ConnectError:
-        print("Instance ", instance, " Failed")
-        servers[instance] = False
-        raise HTTPException(status_code=503)
-    except Exception as e:
-        print(repr(e))
-        raise
+        raise HTTPException(
+            status_code=503,
+            detail="No healthy backend servers available"
+        )
     
+    return instance
 
-    return response.json()
+
+async def forward_requests(url: str):
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url)
+    except httpx.ConnectError:
+        print("Request ", url, " Failed")
+        raise HTTPException(status_code=503)
+    
+    return response
+
+
+@app.api_route("/", methods=["GET"])
+@app.api_route("/{catchall:path}",methods=["GET"])
+async def reverse_proxy(request:Request, catchall:str = ""):
+    instance = get_next_server()
+    print(request.url, flush = True)
+    try:
+        response = await forward_requests(instance+catchall)
+        return response.json()
+    except HTTPException as e:
+        if e.status_code == 503:
+            servers[instance] = False
+        raise

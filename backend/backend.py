@@ -5,7 +5,7 @@ import http
 app = FastAPI()
 SERVER = os.getenv("SERVER", "Unknown")
 
-@app.get("/")
+@app.get("/hello")
 def ping_server():
     return {
         "message": "Hello from backend",
