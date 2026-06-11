@@ -62,6 +62,9 @@ def get_next_server():
 
 
 async def forward_requests(url: str):
+    # print("Reached forward_requests: ", url)
+    # await asyncio.sleep(10) #turning off a server mid request to check redundant server call
+    print("Trying connection to ", url)
     try:
         async with httpx.AsyncClient() as client:
             response = await client.get(url)
@@ -75,12 +78,23 @@ async def forward_requests(url: str):
 @app.api_route("/", methods=["GET"])
 @app.api_route("/{catchall:path}",methods=["GET"])
 async def reverse_proxy(request:Request, catchall:str = ""):
-    instance = get_next_server()
-    print(request.url, flush = True)
-    try:
-        response = await forward_requests(instance+catchall)
-        return response.json()
-    except HTTPException as e:
-        if e.status_code == 503:
-            servers[instance] = False
-        raise
+    
+    retries = sum(servers.values())
+    while retries>0:
+        instance = get_next_server()
+        print(request.url, flush = True)
+        try:
+            response = await forward_requests(instance+catchall)
+            return response.json()
+        except HTTPException as e:
+            if e.status_code == 503:
+                servers[instance] = False
+                retries -= 1
+                continue
+
+            raise #when its not 503 raise the exception
+    
+    raise HTTPException(
+        status_code=503,
+        detail="No healthy backend servers"
+    )
