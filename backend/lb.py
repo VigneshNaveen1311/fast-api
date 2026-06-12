@@ -3,13 +3,19 @@ import httpx
 import itertools
 import asyncio
 
+from redis import Redis
+
 app = FastAPI()
 
-servers = {
-    "http://127.0.0.1:8001/": True,
-    "http://127.0.0.1:8002/": True,
-    "http://127.0.0.1:8003/": True,
-}
+r = Redis(host='localhost', port=6379, db=0, decode_responses=True)
+
+servers = [
+    "http://127.0.0.1:8001/",
+    "http://127.0.0.1:8002/",
+    "http://127.0.0.1:8003/"
+]
+
+
 
 async def check_server(server):
     print("Checking!", server, flush=True)
@@ -21,10 +27,10 @@ async def check_server(server):
             response = await client.get(f"{server}health")
             print("Status:", response.status_code, flush=True)
 
-        servers[server] = response.status_code == 200
+        r.set(server, 1 if response.status_code == 200 else 0)
     except Exception as e:
         print("Health check failed:", server, repr(e), flush=True)
-        servers[server] = False
+        r.set(server, 0)
 
 
 
@@ -39,6 +45,9 @@ async def health_check():
 
 @app.on_event("startup")
 async def startup_event():
+    for server in servers:
+        if r.get(server) is None:
+            r.set(server, 1)
     asyncio.create_task(health_check())
 
 
@@ -46,10 +55,11 @@ urls = itertools.cycle(servers)
 
 
 def get_next_server():
-    print("Healthy count =", sum(servers.values()), flush=True)
+    healthy_servers = sum(int(r.get(server)) for server in servers)
+    print("Healthy count =", healthy_servers, flush=True)
     instance = next(urls)
-    if sum(servers.values()) > 0:
-        while servers[instance] != True:
+    if healthy_servers > 0:
+        while int(r.get(instance)) != 1:
             print("Trying server:", instance, flush=True)
             instance = next(urls)
     else:
@@ -84,7 +94,7 @@ async def forward_requests(url: str, method, headers, body):
 @app.api_route("/{catchall:path}",methods=["GET","POST"])
 async def reverse_proxy(request:Request, catchall:str = ""):
     
-    retries = sum(servers.values())
+    retries = sum(int(r.get(server)) for server in servers)
     body = await request.body()
     headers = dict(request.headers)
     headers.pop("host", None) #dont want to forward localhost
@@ -107,7 +117,7 @@ async def reverse_proxy(request:Request, catchall:str = ""):
             )
         except HTTPException as e:
             if e.status_code == 503:
-                servers[instance] = False
+                r.set(instance, 0)
                 retries -= 1
                 continue
 
