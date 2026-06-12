@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 import httpx
 import itertools
 import asyncio
@@ -61,13 +61,18 @@ def get_next_server():
     return instance
 
 
-async def forward_requests(url: str):
+async def forward_requests(url: str, method, headers, body):
     # print("Reached forward_requests: ", url)
     # await asyncio.sleep(10) #turning off a server mid request to check redundant server call
     print("Trying connection to ", url)
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.get(url)
+            response = await client.request(
+                method=method,
+                url=url,
+                headers=headers,
+                content=body
+            )
     except httpx.ConnectError:
         print("Request ", url, " Failed")
         raise HTTPException(status_code=503)
@@ -76,16 +81,30 @@ async def forward_requests(url: str):
 
 
 @app.api_route("/", methods=["GET"])
-@app.api_route("/{catchall:path}",methods=["GET"])
+@app.api_route("/{catchall:path}",methods=["GET","POST"])
 async def reverse_proxy(request:Request, catchall:str = ""):
     
     retries = sum(servers.values())
+    body = await request.body()
+    headers = dict(request.headers)
+    headers.pop("host", None) #dont want to forward localhost
+    print("BODY =", body, flush = True)
+    print("HEADERS =", headers, flush = True)
     while retries>0:
         instance = get_next_server()
         print(request.url, flush = True)
         try:
-            response = await forward_requests(instance+catchall)
-            return response.json()
+            # response = await forward_requests(instance+catchall)
+            response = await forward_requests(
+                url=instance+catchall,
+                method=request.method,
+                headers=headers,
+                body=body
+            )
+            return Response(
+                content=response.content,
+                status_code=response.status_code
+            )
         except HTTPException as e:
             if e.status_code == 503:
                 servers[instance] = False
