@@ -1,5 +1,11 @@
-.\venv\Scripts\Activate.ps1
+For new projects, run:
 
+    python -m venv venv
 
+Then activate the virtual environment manually:
 
-but its auto venv set in Preferences> Open Settings (UI)> Python > Terminal : activate environment is ON so no need
+    .\venv\Scripts\Activate.ps1
+
+This note is for automating the above steps.
+
+However, if VS Code is already configured with Preferences > Open Settings (UI) > Python > Terminal: Activate Environment = ON, then manual activation is not required.
